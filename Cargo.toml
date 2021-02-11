@@ -14,4 +14,4 @@ nnsplit = { version="*", features=["tract-backend"]}
 walkdir = "*"
 itertools = "*"
 rayon = "*"
-srx = { path = "../srx", features = ["from_xml"] }
+srx = { version = "0.1.2, features = ["from_xml"] }
