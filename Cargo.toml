@@ -11,4 +11,4 @@ quick-xml = { version = "*", features = ["escape-html"], git = "https://github.c
 walkdir = "*"
 itertools = "*"
 rayon = "*"
-srx = { version = "*", features = ["from_xml"], path = "../srx" }
+#srx = { version = "*", features = ["from_xml"] }
