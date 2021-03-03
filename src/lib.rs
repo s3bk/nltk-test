@@ -129,7 +129,8 @@ pub fn clean() {
         .map(|entry| {
             let mut accumulator = TextAccumulator::new();
 
-            let input = std::fs::read_to_string(entry.path()).expect("can't read input");
+            let raw_input = std::fs::read(entry.path()).expect("can't read input");
+            let input = String::from_utf8_lossy(&raw_input);
             parse_quick_xml(&input, &mut accumulator);
             //parse_html(&input, &mut accumulator);
             
