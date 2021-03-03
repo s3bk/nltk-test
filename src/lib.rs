@@ -155,7 +155,7 @@ pub fn clean() {
 }
 
 fn parse_quick_xml(input: &str, accumulator: &mut TextAccumulator) {
-    use quick_xml::{Reader, events::Event, Error, escape::EscapeError};
+    use quick_xml::{Reader, events::Event};
 
     let mut buf = Vec::new();
     tag_content(input, "document", |doc| {
@@ -185,9 +185,6 @@ fn parse_quick_xml(input: &str, accumulator: &mut TextAccumulator) {
                         }
                     }
                     Ok(Event::Eof) => break,
-                    Err(Error::EscapeError(EscapeError::UnterminatedEntity(range))) => {
-                        println!("{}", String::from_utf8_lossy(&buf[range]));
-                    }
                     Err(e) => {
                         println!("{:?}", e);
                     }
