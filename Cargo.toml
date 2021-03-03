@@ -7,11 +7,8 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-#rust-bert = "*"
-quick-xml = "*"
-#tch = "*"
-nnsplit = { version="*", features=["tract-backend"]}
+quick-xml = { version = "*", features = ["escape-html"], path = "../quick-xml" }
 walkdir = "*"
 itertools = "*"
 rayon = "*"
-srx = { version = "0.1.2, features = ["from_xml"] }
+srx = { version = "*", features = ["from_xml"], path = "../srx" }

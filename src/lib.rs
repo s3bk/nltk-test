@@ -1,4 +1,3 @@
-use quick_xml::{Reader, events::Event};
 use walkdir::WalkDir;
 use itertools::Itertools;
 use rayon::prelude::*;
@@ -7,7 +6,10 @@ macro_rules! ok_or_continue {
     ($r:expr) => {
         match $r {
             Ok(v) => v,
-            _ => continue
+            Err(e) => {
+                println!("{:?}", e);
+                continue;
+            }
         }
     };
 }
@@ -42,11 +44,11 @@ impl TextAccumulator {
     }
     fn push(&mut self, c: char) {
         match (c, self.state) {
-            (' ', AccState::Word) | ('\u{A0}', AccState::Word) => self.state = AccState::Space,
-            (' ', _) | ('\u{A0}', _) => {},
             ('\n', AccState::Break) => self.state = AccState::Para,
             ('\n', AccState::Para) => {},
             ('\n', _) => self.state = AccState::Break,
+            (c, AccState::Word) if c.is_whitespace() => self.state = AccState::Space,
+            (c, _) if c.is_whitespace() => {},
             (c, AccState::Word) => self.data.push(c),
             (c, AccState::Space) | (c, AccState::Break) => {
                 self.data.push(' ');
@@ -75,7 +77,7 @@ impl TextAccumulator {
     }
 }
 
-pub fn run(splitter: impl for<'a> Fn(&[&'a str]) -> Vec<Vec<&'a str>> + Sync) {
+pub fn run(splitter: impl Fn(&str) + Sync) {
     let root = std::env::args().nth(1).expect("no input filename");
     
     let files: Vec<_> = WalkDir::new(root).into_iter()
@@ -88,56 +90,59 @@ pub fn run(splitter: impl for<'a> Fn(&[&'a str]) -> Vec<Vec<&'a str>> + Sync) {
             let mut n_sents = 0;
             let mut n_bytes = 0;
 
-            let mut accumulator = TextAccumulator::new();
-            let mut buf = Vec::new();
-
             let input = std::fs::read_to_string(entry.path()).expect("can't read input");
 
-            for doc in tag_content(&input, "<DOCUMENT>", "</DOCUMENT>") {
-                for html in tag_content(doc, "<HTML>", "</HTML>") {
-                    let mut reader = Reader::from_str(html);
-                    while let Ok(e) = reader.read_event(&mut buf) {
-                        match e {
-                            Event::Text(b) => {
-                                let text = ok_or_continue!(b.unescaped());
-                                let s = ok_or_continue!(reader.decode(text.as_ref()));
-                                accumulator.push(' ');
-                                accumulator.push_str(s);
-                                accumulator.push(' ');
-                            }
-                            Event::Start(ref e) => {
-                                match e.name() {
-                                    b"br" | b"BR" => accumulator.push('\n'),
-                                    b"p" | b"P" | b"TITLE"  => accumulator.push('\n'),
-                                    _ => {}
-                                }
-                            }
-                            Event::End(ref e) => {
-                                match e.name() {
-                                    b"p" | b"P" | b"TITLE" => accumulator.push('\n'),
-                                    _ => {}
-                                }
-                            }
-                            _ => {}
-                        }
-                    }
-                    buf.clear();
-                }
-            }
+            n_bytes
+        })
+        .sum();
+    
+    println!("{} total bytes", total_bytes);
+}
 
+fn tag_content<'a>(data: &'a str, tag: &str, mut cb: impl FnMut(&'a str)) {
+    let start_lower = format!("<{}>", tag.to_lowercase());
+    let start_upper = format!("<{}>", tag.to_uppercase());
+    let end_lower = format!("</{}>", tag.to_lowercase());
+    let end_upper = format!("</{}>", tag.to_uppercase());
+
+    data
+        .split(&start_lower).skip(1)
+        .flat_map(|part| part.rsplitn(1, &end_lower))
+        .for_each(|s| cb(s));
+    
+    data.split(&start_upper).skip(1)
+        .flat_map(|part| part.rsplitn(1, &end_upper))
+        .for_each(|s| cb(s));
+}
+
+pub fn clean() {
+    use std::io::{Write, BufWriter};
+    let root = std::env::args().nth(1).expect("no input filename");
+    
+    let files: Vec<_> = WalkDir::new(root).into_iter()
+        .filter_map(Result::ok)
+        .filter(|entry| entry.file_type().is_file())
+        .filter(|entry| entry.path().extension().map(|ext| ext == "txt").unwrap_or(false))
+        .collect();
+
+    let total_bytes: usize = files.into_par_iter()
+        .map(|entry| {
+            let mut accumulator = TextAccumulator::new();
+
+            let input = std::fs::read_to_string(entry.path()).expect("can't read input");
+            parse_quick_xml(&input, &mut accumulator);
+            //parse_html(&input, &mut accumulator);
             
-            let mut paras = accumulator.splits();
-            n_paras += paras.len();
-            n_bytes += accumulator.data.len();
+            let paras = accumulator.splits();
+            let n_bytes = accumulator.data.len();
 
-            for para in splitter(&paras) {
-                for sent in para {
-                    println!("{}", sent);
-                    n_sents += 1;
+            if n_bytes != 0 {
+                let mut out = BufWriter::new(std::fs::File::create(entry.path().with_extension("plain")).unwrap());
+                for para in paras {
+                    out.write_all(para.as_bytes()).unwrap();
+                    out.write_all("\n".as_bytes()).unwrap();
                 }
-                //println!();
             }
-
             accumulator.clear();
 
             println!("{} bytes in {:?}", n_bytes, entry.path());
@@ -149,7 +154,48 @@ pub fn run(splitter: impl for<'a> Fn(&[&'a str]) -> Vec<Vec<&'a str>> + Sync) {
     println!("{} total bytes", total_bytes);
 }
 
-fn tag_content<'a>(data: &'a str, start: &'a str, end: &'a str) -> impl Iterator<Item=&'a str> + 'a {
-    data.split(start).skip(1)
-        .flat_map(move |part| part.rsplitn(1, end))
+fn parse_quick_xml(input: &str, accumulator: &mut TextAccumulator) {
+    use quick_xml::{Reader, events::Event, Error, escape::EscapeError};
+
+    let mut buf = Vec::new();
+    tag_content(input, "document", |doc| {
+        tag_content(doc, "html", |html| {
+            let mut reader = Reader::from_str(html);
+            reader.check_end_names(false);
+            loop {
+                match reader.read_event(&mut buf) {
+                    Ok(Event::Text(b)) => {
+                        let text = ok_or_continue!(b.unescaped());
+                        let s = ok_or_continue!(reader.decode(text.as_ref()));
+                        accumulator.push(' ');
+                        accumulator.push_str(s);
+                        accumulator.push(' ');
+                    }
+                    Ok(Event::Start(ref e)) => {
+                        match e.name() {
+                            b"br" | b"BR" | b"div" | b"DIV" => accumulator.push('\n'),
+                            b"p" | b"P" | b"TITLE" | b"title" => accumulator.push('\n'),
+                            _ => {}
+                        }
+                    }
+                    Ok(Event::End(ref e)) => {
+                        match e.name() {
+                            b"p" | b"P" | b"TITLE" | b"title" => accumulator.push('\n'),
+                            _ => {}
+                        }
+                    }
+                    Ok(Event::Eof) => break,
+                    Err(Error::EscapeError(EscapeError::UnterminatedEntity(range))) => {
+                        println!("{}", String::from_utf8_lossy(&buf[range]));
+                    }
+                    Err(e) => {
+                        println!("{:?}", e);
+                    }
+                    _ => {}
+                }
+            }
+            buf.clear();
+            accumulator.push('\n');
+        });
+    });
 }
