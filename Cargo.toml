@@ -12,3 +12,7 @@ walkdir = "*"
 itertools = "*"
 rayon = "*"
 #srx = { version = "*", features = ["from_xml"] }
+
+serde = { version = "*", features = ["derive"] }
+serde_json = "*"
+tuple = "*"
