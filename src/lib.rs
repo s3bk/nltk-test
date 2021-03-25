@@ -99,22 +99,6 @@ pub fn run(splitter: impl Fn(&str) + Sync) {
     println!("{} total bytes", total_bytes);
 }
 
-fn tag_content<'a>(data: &'a str, tag: &str, mut cb: impl FnMut(&'a str)) {
-    let start_lower = format!("<{}>", tag.to_lowercase());
-    let start_upper = format!("<{}>", tag.to_uppercase());
-    let end_lower = format!("</{}>", tag.to_lowercase());
-    let end_upper = format!("</{}>", tag.to_uppercase());
-
-    data
-        .split(&start_lower).skip(1)
-        .flat_map(|part| part.rsplitn(1, &end_lower))
-        .for_each(|s| cb(s));
-    
-    data.split(&start_upper).skip(1)
-        .flat_map(|part| part.rsplitn(1, &end_upper))
-        .for_each(|s| cb(s));
-}
-
 pub fn clean() {
     use std::io::{Write, BufWriter};
     let root = std::env::args().nth(1).expect("no input filename");
@@ -159,41 +143,41 @@ fn parse_quick_xml(input: &str, accumulator: &mut TextAccumulator) {
     use quick_xml::{Reader, events::Event};
 
     let mut buf = Vec::new();
-    tag_content(input, "document", |doc| {
-        tag_content(doc, "html", |html| {
-            let mut reader = Reader::from_str(html);
-            reader.check_end_names(false);
-            loop {
-                match reader.read_event(&mut buf) {
-                    Ok(Event::Text(b)) => {
-                        let text = ok_or_continue!(b.unescaped());
-                        let s = ok_or_continue!(reader.decode(text.as_ref()));
-                        accumulator.push(' ');
-                        accumulator.push_str(s);
-                        accumulator.push(' ');
-                    }
-                    Ok(Event::Start(ref e)) => {
-                        match e.name() {
-                            b"br" | b"BR" | b"div" | b"DIV" => accumulator.push('\n'),
-                            b"p" | b"P" | b"TITLE" | b"title" => accumulator.push('\n'),
-                            _ => {}
-                        }
-                    }
-                    Ok(Event::End(ref e)) => {
-                        match e.name() {
-                            b"p" | b"P" | b"TITLE" | b"title" => accumulator.push('\n'),
-                            _ => {}
-                        }
-                    }
-                    Ok(Event::Eof) => break,
-                    Err(e) => {
-                        println!("{:?}", e);
-                    }
+    let mut reader = Reader::from_str(input);
+    reader.check_end_names(false);
+    loop {
+        match reader.read_event(&mut buf) {
+            Ok(Event::Text(b)) => {
+                if b.starts_with(b"\nbegin 644 ") {
+                    println!("skip");
+                    reader.read_until_marker(&mut buf, b"end");
+                    continue;
+                }
+                let text = ok_or_continue!(b.unescaped());
+                let s = ok_or_continue!(reader.decode(text.as_ref()));
+                accumulator.push(' ');
+                accumulator.push_str(s);
+                accumulator.push(' ');
+            }
+            Ok(Event::Start(ref e)) => {
+                match e.name() {
+                    b"br" | b"BR" | b"div" | b"DIV" => accumulator.push('\n'),
+                    b"p" | b"P" | b"TITLE" | b"title" => accumulator.push('\n'),
                     _ => {}
                 }
             }
-            buf.clear();
-            accumulator.push('\n');
-        });
-    });
+            Ok(Event::End(ref e)) => {
+                match e.name() {
+                    b"p" | b"P" | b"TITLE" | b"title" => accumulator.push('\n'),
+                    _ => {}
+                }
+            }
+            Ok(Event::Eof) => break,
+            Err(e) => {
+                println!("{:?}", e);
+            }
+            _ => {}
+        }
+    }
+    accumulator.push('\n');
 }
