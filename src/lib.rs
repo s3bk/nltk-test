@@ -43,7 +43,16 @@ impl TextAccumulator {
         }
     }
     fn push_raw(&mut self, s: &str) {
+        match self.state {
+            AccState::Space | AccState::Break => self.data.push(' '),
+            AccState::Para => {
+                self.data.push('\n');
+                self.paras.push(self.data.len());
+            },
+            _ => {}
+        }
         self.data.push_str(s);
+        self.state = AccState::Word;
     }
     fn push(&mut self, c: char) {
         match (c, self.state) {
