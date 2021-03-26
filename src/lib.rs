@@ -42,6 +42,9 @@ impl TextAccumulator {
             self.push(c);
         }
     }
+    fn push_raw(&mut self, s: &str) {
+        self.data.push_str(s);
+    }
     fn push(&mut self, c: char) {
         match (c, self.state) {
             ('\n', AccState::Break) => self.state = AccState::Para,
@@ -145,6 +148,7 @@ fn parse_quick_xml(input: &str, accumulator: &mut TextAccumulator) {
     let mut buf = Vec::new();
     let mut reader = Reader::from_str(input);
     reader.check_end_names(false);
+    let mut in_html = false;
     loop {
         match reader.read_event(&mut buf) {
             Ok(Event::Text(b)) => {
@@ -156,19 +160,25 @@ fn parse_quick_xml(input: &str, accumulator: &mut TextAccumulator) {
                 let text = ok_or_continue!(b.unescaped());
                 let s = ok_or_continue!(reader.decode(text.as_ref()));
                 accumulator.push(' ');
-                accumulator.push_str(s);
+                if in_html {
+                    accumulator.push_str(s);
+                } else {
+                    accumulator.push_raw(s);
+                }
                 accumulator.push(' ');
             }
             Ok(Event::Start(ref e)) => {
                 match e.name() {
                     b"br" | b"BR" | b"div" | b"DIV" => accumulator.push('\n'),
                     b"p" | b"P" | b"TITLE" | b"title" => accumulator.push('\n'),
+                    b"HTML" | b"html" => in_html = true,
                     _ => {}
                 }
             }
             Ok(Event::End(ref e)) => {
                 match e.name() {
                     b"p" | b"P" | b"TITLE" | b"title" => accumulator.push('\n'),
+                    b"HTML" | b"html" => in_html = false,
                     _ => {}
                 }
             }
