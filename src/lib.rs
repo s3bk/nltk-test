@@ -85,6 +85,7 @@ impl TextAccumulator {
         if let Some(&last) = self.paras.last() {
             splits.push(&self.data[.. last]);
         }
+        splits.push(&self.data[self.paras.last().cloned().unwrap_or(0)..]);
         splits
     }
 }
