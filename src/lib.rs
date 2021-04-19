@@ -20,6 +20,7 @@ macro_rules! ok_or_continue {
 enum AccState {
     Word,
     Space,
+    CellSep,
     Break,
     Para
 }
@@ -54,25 +55,41 @@ impl TextAccumulator {
         self.data.push_str(s);
         self.state = AccState::Word;
     }
+    fn push_cell_sep(&mut self) {
+        match self.state {
+            AccState::Para => {}
+            _ => self.state = AccState::CellSep,
+        }
+        
+    }
     fn push(&mut self, c: char) {
-        match (c, self.state) {
-            ('\n', AccState::Break) => self.state = AccState::Para,
-            ('\n', AccState::Para) => {},
-            ('\n', _) => self.state = AccState::Break,
-            (c, AccState::Word) if c.is_whitespace() => self.state = AccState::Space,
-            (c, _) if c.is_whitespace() => {},
-            (c, AccState::Word) => self.data.push(c),
-            (c, AccState::Space) | (c, AccState::Break) => {
-                self.data.push(' ');
-                self.data.push(c);
-                self.state = AccState::Word;
+        if c == '\n' {
+            match self.state {
+                AccState::Break => self.state = AccState::Para,
+                AccState::Para => {},
+                _ => self.state = AccState::Break,
             }
-            (c, AccState::Para) => {
-                self.data.push('\n');
-                self.paras.push(self.data.len());
-                self.data.push(c);
-                self.state = AccState::Word;
+        } else if c.is_whitespace() {
+            match self.state {
+                AccState::Word => self.state = AccState::Space,
+                _ => {},
             }
+        } else {
+            match self.state {
+                AccState::Word => {},
+                AccState::CellSep => {
+                    self.data.push_str(" | ");
+                }
+                AccState::Space | AccState::Break => {
+                    self.data.push(' ');
+                }
+                AccState::Para => {
+                    self.data.push('\n');
+                    self.paras.push(self.data.len());
+                }
+            }
+            self.data.push(c);
+            self.state = AccState::Word;
         }
     }
     fn clear(&mut self) {
@@ -80,7 +97,7 @@ impl TextAccumulator {
         self.paras.clear();
     }
     fn splits(&self) -> Vec<&str> {
-        let mut splits = Vec::with_capacity(self.paras.len() + 1);
+        let mut splits = Vec::with_capacity(self.paras.len() + 2);
         splits.extend(self.paras.iter().cloned().tuple_windows().map(|(a, b)| &self.data[a .. b]));
         if let Some(&last) = self.paras.last() {
             splits.push(&self.data[.. last]);
@@ -159,6 +176,7 @@ fn parse_quick_xml(input: &str, accumulator: &mut TextAccumulator) {
     let mut reader = Reader::from_str(input);
     reader.check_end_names(false);
     let mut in_html = false;
+    let mut in_cell = false;
     loop {
         match reader.read_event(&mut buf) {
             Ok(Event::Text(b)) => {
@@ -179,16 +197,23 @@ fn parse_quick_xml(input: &str, accumulator: &mut TextAccumulator) {
             }
             Ok(Event::Start(ref e)) => {
                 match e.name() {
-                    b"br" | b"BR" | b"div" | b"DIV" => accumulator.push('\n'),
-                    b"p" | b"P" | b"TITLE" | b"title" => accumulator.push('\n'),
+                    b"br" | b"BR" => accumulator.push('\n'),
+                    b"p" | b"P" | b"TITLE" | b"title" | b"tr" | b"TR" => accumulator.push('\n'),
+                    b"div" | b"DIV" if !in_cell => accumulator.push('\n'),
                     b"HTML" | b"html" => in_html = true,
+                    b"td" | b"TD" => in_cell = true,
                     _ => {}
                 }
             }
             Ok(Event::End(ref e)) => {
                 match e.name() {
-                    b"p" | b"P" | b"TITLE" | b"title" => accumulator.push('\n'),
+                    b"p" | b"P" | b"TITLE" | b"title" | b"tr" | b"TR" => accumulator.push('\n'),
+                    b"div" | b"DIV" if !in_cell => accumulator.push('\n'),
                     b"HTML" | b"html" => in_html = false,
+                    b"td" | b"TD" => {
+                        in_cell = false;
+                        accumulator.push_cell_sep();
+                    },
                     _ => {}
                 }
             }
