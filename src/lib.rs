@@ -60,7 +60,12 @@ impl TextAccumulator {
             AccState::Para => {}
             _ => self.state = AccState::CellSep,
         }
-        
+    }
+    fn push_break(&mut self) {
+        match self.state {
+            AccState::Para => {}
+            _ => self.state = AccState::Break,
+        }
     }
     fn push(&mut self, c: char) {
         if c == '\n' {
@@ -80,8 +85,11 @@ impl TextAccumulator {
                 AccState::CellSep => {
                     self.data.push_str(" | ");
                 }
-                AccState::Space | AccState::Break => {
+                AccState::Space => {
                     self.data.push(' ');
+                }
+                AccState::Break => {
+                    self.data.push('\n');
                 }
                 AccState::Para => {
                     self.data.push('\n');
@@ -197,8 +205,8 @@ fn parse_quick_xml(input: &str, accumulator: &mut TextAccumulator) {
             }
             Ok(Event::Start(ref e)) => {
                 match e.name() {
-                    b"br" | b"BR" => accumulator.push('\n'),
-                    b"p" | b"P" | b"TITLE" | b"title" | b"tr" | b"TR" => accumulator.push('\n'),
+                    b"br" | b"BR" | b"tr" | b"TR"=> accumulator.push_break(),
+                    b"p" | b"P" | b"TITLE" | b"title" => accumulator.push('\n'),
                     b"div" | b"DIV" if !in_cell => accumulator.push('\n'),
                     b"HTML" | b"html" => in_html = true,
                     b"td" | b"TD" => in_cell = true,
@@ -207,7 +215,8 @@ fn parse_quick_xml(input: &str, accumulator: &mut TextAccumulator) {
             }
             Ok(Event::End(ref e)) => {
                 match e.name() {
-                    b"p" | b"P" | b"TITLE" | b"title" | b"tr" | b"TR" => accumulator.push('\n'),
+                    b"p" | b"P" | b"TITLE" | b"title" => accumulator.push('\n'),
+                    b"tr" | b"TR" => accumulator.push_break(),
                     b"div" | b"DIV" if !in_cell => accumulator.push('\n'),
                     b"HTML" | b"html" => in_html = false,
                     b"td" | b"TD" => {
