@@ -1,6 +1,8 @@
 use walkdir::WalkDir;
 use itertools::Itertools;
 use rayon::prelude::*;
+use serde::Deserialize;
+use std::borrow::Cow;
 
 macro_rules! ok_or_continue {
     ($r:expr) => {
@@ -193,15 +195,24 @@ fn parse_quick_xml(input: &str, accumulator: &mut TextAccumulator) {
                     reader.read_until_marker(&mut buf, b"end");
                     continue;
                 }
-                let text = ok_or_continue!(b.unescaped());
-                let s = ok_or_continue!(reader.decode(text.as_ref()));
-                accumulator.push(' ');
-                if in_html {
-                    accumulator.push_str(s);
-                } else {
-                    accumulator.push_raw(s);
+                match b.unescaped() {
+                    Ok(Cow::Borrowed(text)) => {
+                        let s = ok_or_continue!(reader.decode(text.as_ref()));
+                        accumulator.push(' ');
+                        if in_html {
+                            accumulator.push_str(s);
+                        } else {
+                            accumulator.push_raw(s);
+                        }
+                        accumulator.push(' ');
+                    }
+                    Ok(Cow::Owned(text)) => {
+                        // might contain HTML ... don't ask
+                        let s = ok_or_continue!(reader.decode(text.as_ref()));
+                        parse_quick_xml(s, accumulator);
+                    }
+                    Err(_) => continue
                 }
-                accumulator.push(' ');
             }
             Ok(Event::Start(ref e)) => {
                 match e.name() {
@@ -234,4 +245,39 @@ fn parse_quick_xml(input: &str, accumulator: &mut TextAccumulator) {
         }
     }
     accumulator.push('\n');
+}
+
+#[derive(Deserialize)]
+#[derive(Debug, PartialOrd, Ord, PartialEq, Eq)]
+pub struct Match<'a> {
+    pub span: (usize, usize),
+    pub label: &'a str,
+    pub text: Cow<'a, str>,
+}
+
+pub struct IndexTranslator<'a> {
+    data: &'a str,
+    byte_idx: usize,
+    char_idx: usize,
+}
+impl<'a> IndexTranslator<'a> {
+    pub fn new(data: &'a str) -> IndexTranslator<'a> {
+        IndexTranslator {
+            data, byte_idx: 0, char_idx: 0
+        }
+    }
+    pub fn next_byte_idx_for_char_idx(&mut self, char_idx: usize) -> Option<usize> {
+        assert!(char_idx >= self.char_idx);
+        let mut chars = self.data[self.byte_idx..].chars();
+        let n_chars = char_idx - self.char_idx;
+        if chars.by_ref().take(n_chars).count() == n_chars {
+            let byte_idx = self.data.len() - chars.as_str().len();
+            assert!(byte_idx >= self.byte_idx);
+            self.byte_idx = byte_idx;
+            self.char_idx = char_idx;
+            Some(byte_idx)
+        } else {
+            None
+        }
+    }
 }

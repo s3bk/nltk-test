@@ -3,43 +3,8 @@
 use serde::Deserialize;
 use itertools::{Itertools};
 use std::{iter, fs, fmt::Write};
-use std::borrow::Cow;
 use std::path::PathBuf;
-
-#[derive(Deserialize)]
-#[derive(Debug, PartialOrd, Ord, PartialEq, Eq)]
-struct Match<'a> {
-    span: (usize, usize),
-    label: &'a str,
-    text: Cow<'a, str>,
-}
-
-struct IndexTranslator<'a> {
-    data: &'a str,
-    byte_idx: usize,
-    char_idx: usize,
-}
-impl<'a> IndexTranslator<'a> {
-    fn new(data: &'a str) -> IndexTranslator<'a> {
-        IndexTranslator {
-            data, byte_idx: 0, char_idx: 0
-        }
-    }
-    fn next_byte_idx_for_char_idx(&mut self, char_idx: usize) -> Option<usize> {
-        assert!(char_idx >= self.char_idx);
-        let mut chars = self.data[self.byte_idx..].chars();
-        let n_chars = char_idx - self.char_idx;
-        if chars.by_ref().take(n_chars).count() == n_chars {
-            let byte_idx = self.data.len() - chars.as_str().len();
-            assert!(byte_idx >= self.byte_idx);
-            self.byte_idx = byte_idx;
-            self.char_idx = char_idx;
-            Some(byte_idx)
-        } else {
-            None
-        }
-    }
-}
+use nltk_test::{IndexTranslator, Match};
 
 fn merge(plain: &str, matches: &[Vec<Vec<Match>>], out: &mut String) {
     use tuple::{TupleElements};
